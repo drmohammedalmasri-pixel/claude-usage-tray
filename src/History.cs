@@ -45,7 +45,14 @@ public class History
 
     public static History Load()
     {
-        try { if (File.Exists(FilePath)) return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Deserialize<History>(File.ReadAllText(FilePath)); }
+        try
+        {
+            if (File.Exists(FilePath))
+            {
+                // an ended session is closed by the first minute tick, after the settings (MinFive) are applied
+                return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Deserialize<History>(File.ReadAllText(FilePath));
+            }
+        }
         catch (Exception ex) { Settings.Log("history load: " + ex.Message); }
         return new History();
     }
@@ -191,6 +198,19 @@ public class History
         Cur.FiveMax = Math.Max(Cur.FiveMax, f);
         Cur.WeekTo = w;
         Cur.End = Settings.D2S(t);
+    }
+
+    // The running session moves to the list as soon as its 5-hour window has ended,
+    // even when no new reading comes (PC asleep, app not fetching). Returns true if one was closed.
+    public bool CloseExpired(DateTime now)
+    {
+        if (Cur == null) return false;
+        DateTime end;
+        if (!DateTime.TryParseExact(Cur.Key, "yyyyMMddHHmm", CultureInfo.InvariantCulture, DateTimeStyles.None, out end)) return false;
+        if (now < end) return false;
+        Finish();
+        Save();
+        return true;
     }
 
     void Finish()

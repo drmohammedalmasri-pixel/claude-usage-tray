@@ -773,6 +773,10 @@ public class TrayApp : ApplicationContext
     DateTime lastMove = DateTime.MinValue, lastSuccess = DateTime.MinValue;
     string lastError;
     bool busy;
+    DateTime busySince;
+    string loggedError; // last error written to log.txt (same error is logged again only every 30 min)
+    DateTime loggedErrorAt;
+    int failCount;
     History hist = History.Load();
     HistoryForm histForm;
     ToolStripMenuItem miFive, miAuto, miExport;
@@ -814,7 +818,7 @@ public class TrayApp : ApplicationContext
         poll.Start();
 
         tick.Interval = 60 * 1000; // elapsed time moves even without new data
-        tick.Tick += delegate { UpdateUi(); };
+        tick.Tick += delegate { hist.CloseExpired(DateTime.Now); UpdateUi(); };
         tick.Start();
 
         SystemEvents.PowerModeChanged += (s, e) =>
@@ -887,12 +891,19 @@ public class TrayApp : ApplicationContext
 
     void Refresh()
     {
-        if (busy) return;
+        if (busy)
+        {
+            // a fetch that never returns must not stop all later updates
+            if ((DateTime.Now - busySince).TotalMinutes < 2) return;
+            Settings.Log("fetch still running after 2 min -> starting a new one");
+        }
         busy = true;
+        busySince = DateTime.Now;
         Task.Factory.StartNew(() => Api.Fetch()).ContinueWith(t =>
         {
             // a crash inside Fetch must not leave "busy" stuck (that would stop all later updates)
             var r = t.IsFaulted ? new Api.Result { Error = L.T("read_fail") } : t.Result;
+            if (t.IsFaulted) Settings.Log("fetch crashed: " + t.Exception.GetBaseException().Message);
             invoker.BeginInvoke((MethodInvoker)delegate
             {
                 busy = false;
@@ -905,6 +916,8 @@ public class TrayApp : ApplicationContext
                     lastSuccess = DateTime.Now;
                     st.LastFetch = Settings.D2S(lastSuccess);
                     lastError = null;
+                    if (failCount > 0) Settings.Log("fetch ok again after " + failCount + " failed tries");
+                    failCount = 0; loggedError = null;
                     st.LastOpusPct = r.Opus;
                     st.NoFive = r.Five == null && r.Week != null;
                     st.Save();
@@ -914,6 +927,12 @@ public class TrayApp : ApplicationContext
                 else
                 {
                     lastError = r.Error;
+                    failCount++;
+                    if (r.Error != loggedError || (DateTime.Now - loggedErrorAt).TotalMinutes >= 30)
+                    {
+                        Settings.Log("fetch failed (" + failCount + "): " + r.Error + (r.Busy ? " [slow retry]" : ""));
+                        loggedError = r.Error; loggedErrorAt = DateTime.Now;
+                    }
                     poll.Interval = PollMs(r.Busy);
                 }
                 UpdateUi();
