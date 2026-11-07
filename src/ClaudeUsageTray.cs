@@ -27,6 +27,12 @@ static class Program
         L.Set(args.Length >= 3 ? args[2] : Settings.Load().Language);
         if (args.Length >= 2 && args[0] == "--png") { TrayApp.Preview(args[1]); return; }
         if (args.Length >= 2 && args[0] == "--test") { History.SelfTest(args[1]); return; }
+        if (args.Length == 1 && args[0] == "--update-now") // check + install without the tray (for tests); exit code 0 = updated
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            var u = Updater.Check(); string np;
+            Environment.Exit(u.Error != null ? 3 : !u.Newer ? 1 : (Updater.Download(u, out np) ?? Updater.Install(np)) == null ? 0 : 2);
+        }
         if (args.Length == 2 && args[0] == "--ico") { TrayApp.SaveIco(args[1]); return; }
         if (args.Length >= 2 && args[0] == "--settings")
         {
@@ -40,14 +46,23 @@ static class Program
             return;
         }
         bool created;
+        bool updated = args.Length >= 1 && args[0] == "--updated";
         using (var m = new Mutex(true, "ClaudeUsageTray_SingleInstance", out created))
         {
+            if (!created && updated)
+            {
+                // started by the old version during an update: wait until it has exited
+                try { created = m.WaitOne(20000); } catch (AbandonedMutexException) { created = true; }
+            }
             if (!created) return;
+            Updater.CleanUp();
             try { SetProcessDPIAware(); } catch { }
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new TrayApp());
+            var app = new TrayApp();
+            if (updated) app.AnnounceUpdate();
+            Application.Run(app);
         }
     }
 }
@@ -82,7 +97,9 @@ public class Settings
     public string LastFiveReset;
     public string LastFetch;
     public string Language;               // "" = Windows language; null in old files = Arabic (first versions were Arabic only)
-    public bool NoFive;                   // last fetch had no 5-hour limit (plans with weekly limit only)
+    public bool NoFive;
+    public bool AutoUpdate = true;        // install new GitHub releases by itself
+    public string LastUpdateCheck;                   // last fetch had no 5-hour limit (plans with weekly limit only)
 
     static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTray"); } }
     static string FilePath { get { return Path.Combine(Dir, "settings.json"); } }
@@ -156,7 +173,7 @@ static class Api
         var req = (HttpWebRequest)WebRequest.Create(url);
         req.Method = method;
         req.Timeout = 20000;
-        req.UserAgent = "claude-usage-tray/1.0";
+        req.UserAgent = "claude-usage-tray/" + Updater.Version;
         req.Accept = "application/json";
         if (headers != null) foreach (var kv in headers) req.Headers[kv.Key] = kv.Value;
         if (body != null)
@@ -538,7 +555,7 @@ public class SettingsForm : Form
     double pUsage, pElapsed;
     Panel preview;
 
-    ToggleSwitch tFive, tSessLeft, tOpus, tLong, tWeeks, tExport, tNum, tBars, tBlue, tAuto;
+    ToggleSwitch tFive, tSessLeft, tOpus, tLong, tWeeks, tExport, tNum, tBars, tBlue, tAuto, tUpd;
     Stepper nWeeks, nMin, nYellow, nRed, nBlue, nPoll;
     Picker cLang;
     public bool Autostart { get { return tAuto.Checked; } }
@@ -591,6 +608,7 @@ public class SettingsForm : Form
         Section(L.T("sec_general"));
         tAuto = Toggle(autostart); Add(L.T("autostart"), L.T("autostart_sub"), tAuto);
         nPoll = Step(set.PollMinutes, 1, 60, null); Add(L.T("poll"), L.T("poll_sub"), nPoll);
+        tUpd = Toggle(set.AutoUpdate); Add(L.T("upd_auto"), L.T("upd_auto_sub", Updater.Version), tUpd);
         cLang = new Picker { Font = fTitle, Size = new Size(S(210), S(32)) };
         cLang.Items.Add(L.T("lang_auto")); foreach (var nm in L.Names) cLang.Items.Add(nm);
         cLang.SelectedIndex = string.IsNullOrEmpty(set.Language) ? 0 : Math.Max(0, Array.IndexOf(L.Codes, set.Language) + 1);
@@ -751,6 +769,7 @@ public class SettingsForm : Form
         st.BlueIcon = tBlue.Checked; st.BlueAt = nBlue.Value;
         st.IconNumber = tNum.Checked; st.IconNumberBars = tBars.Checked;
         st.PollMinutes = nPoll.Value;
+        st.AutoUpdate = tUpd.Checked;
         st.Language = cLang.SelectedIndex <= 0 ? "" : L.Codes[cLang.SelectedIndex - 1];
     }
 }
@@ -779,7 +798,10 @@ public class TrayApp : ApplicationContext
     int failCount;
     History hist = History.Load();
     HistoryForm histForm;
-    ToolStripMenuItem miFive, miAuto, miExport;
+    ToolStripMenuItem miFive, miAuto, miExport, miUpdate;
+    Updater.Info pendingUpdate; // newer version found while automatic updates are off
+    bool updBusy;
+    DateTime started = DateTime.Now;
 
     static readonly Color Green = Theme.Green, Yellow = Theme.Yellow, Red = Theme.Red, Blue = Theme.Blue;
 
@@ -818,7 +840,7 @@ public class TrayApp : ApplicationContext
         poll.Start();
 
         tick.Interval = 60 * 1000; // elapsed time moves even without new data
-        tick.Tick += delegate { hist.CloseExpired(DateTime.Now); UpdateUi(); };
+        tick.Tick += delegate { hist.CloseExpired(DateTime.Now); UpdateUi(); AutoCheckUpdate(); };
         tick.Start();
 
         SystemEvents.PowerModeChanged += (s, e) =>
@@ -862,6 +884,7 @@ public class TrayApp : ApplicationContext
         miHead = new ToolStripLabel(L.T("head")) { Tag = "head", Padding = new Padding((int)(8 * sc), (int)(4 * sc), (int)(8 * sc), (int)(6 * sc)), Font = new Font("Segoe UI Semibold", 9f) };
         menu.Items.Add(miHead);
         item(L.T("refresh"), '', delegate { Refresh(); });
+        miUpdate = item(L.T("upd_check"), '', delegate { CheckUpdate(true); });
         item(L.T("history"), '', delegate { ShowHistory(); });
         miExport = item(L.T("export") + "…", '', delegate { ExportHistory(); });
         miExport.Visible = st.ExportMenu;
@@ -936,6 +959,86 @@ public class TrayApp : ApplicationContext
                     poll.Interval = PollMs(r.Busy);
                 }
                 UpdateUi();
+            });
+        });
+    }
+
+    // ---------- self-update ----------
+    public void AnnounceUpdate()
+    {
+        ni.ShowBalloonTip(5000, "Claude Usage Tray", L.T("upd_done", Updater.Version), ToolTipIcon.Info);
+    }
+
+    // minute tick: one check a day (first one 2 min after start), install by itself when switched on
+    void AutoCheckUpdate()
+    {
+        if (updBusy || (DateTime.Now - started).TotalMinutes < 2) return;
+        DateTime last = Settings.S2D(st.LastUpdateCheck) ?? DateTime.MinValue;
+        if ((DateTime.Now - last).TotalHours < 24) return;
+        CheckUpdate(false);
+    }
+
+    void CheckUpdate(bool manual)
+    {
+        if (updBusy) return;
+        if (manual && pendingUpdate != null) { AskInstall(pendingUpdate); return; }
+        updBusy = true;
+        Task.Factory.StartNew(() => Updater.Check()).ContinueWith(t =>
+        {
+            var info = t.IsFaulted ? new Updater.Info { Error = t.Exception.GetBaseException().Message } : t.Result;
+            invoker.BeginInvoke((MethodInvoker)delegate
+            {
+                updBusy = false;
+                if (info.Error == null) { st.LastUpdateCheck = Settings.D2S(DateTime.Now); st.Save(); }
+                if (info.Error != null)
+                {
+                    if (manual) MessageBox.Show(L.T("upd_fail", info.Error), "Claude Usage Tray", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (!info.Newer)
+                {
+                    if (manual) MessageBox.Show(L.T("upd_latest", Updater.Version), "Claude Usage Tray", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                Settings.Log("update found: " + info.Version);
+                if (manual) AskInstall(info);
+                else if (st.AutoUpdate && openDialog == null) Install(info, false);
+                else
+                {
+                    pendingUpdate = info;
+                    miUpdate.Text = L.T("upd_install", info.Version);
+                    ni.ShowBalloonTip(5000, "Claude Usage Tray", L.T("upd_found", info.Version), ToolTipIcon.Info);
+                }
+            });
+        });
+    }
+
+    void AskInstall(Updater.Info info)
+    {
+        string notes = (info.Notes ?? "").Trim();
+        if (notes.Length > 700) notes = notes.Substring(0, 700) + "…";
+        var opts = L.Rtl ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : 0;
+        if (MessageBox.Show(L.T("upd_ask", info.Version, Updater.Version, notes), "Claude Usage Tray",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1, opts) == DialogResult.Yes)
+            Install(info, true);
+    }
+
+    void Install(Updater.Info info, bool manual)
+    {
+        updBusy = true;
+        Task.Factory.StartNew(() => { string p; string e = Updater.Download(info, out p); return e ?? Updater.Install(p); }).ContinueWith(t =>
+        {
+            string err = t.IsFaulted ? t.Exception.GetBaseException().Message : t.Result;
+            invoker.BeginInvoke((MethodInvoker)delegate
+            {
+                updBusy = false;
+                if (err == null) { ni.Visible = false; Application.Exit(); return; } // the new version is already starting
+                if (manual) MessageBox.Show(L.T("upd_fail", err), "Claude Usage Tray", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else
+                {
+                    pendingUpdate = info; // let the user try from the menu
+                    miUpdate.Text = L.T("upd_install", info.Version);
+                }
             });
         });
     }

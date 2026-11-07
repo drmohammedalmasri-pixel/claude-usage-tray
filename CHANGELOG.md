@@ -1,0 +1,17 @@
+# Changelog
+
+## 1.1.0 (2026-11-07)
+
+### New
+- **Updates**: *Check for updates* in the menu. Shows the new version and its notes, installs it and restarts the app.
+- **Automatic updates** switch in Settings → General (on by default): checks once a day and installs new versions by itself, with a notice after the restart. When it is off, the app only tells you a new version exists and the menu item becomes *Install version X*.
+- Downloads come only from this project's GitHub releases and are checked before use (size, Windows program header, SHA-256 checksum from GitHub). If the swap fails, the old version is put back.
+
+### Fixed
+- A finished 5-hour session could be missing from the session list. It was only added after the next reading, so when the PC slept or the app could not fetch, the session stayed hidden. It now moves to the list within a minute after its 5-hour window ends.
+- When fetching usage failed, nothing was written to the log, so the cause could not be found. Every failure is now logged (the same error again only every 30 minutes), plus a line when fetching works again.
+- A fetch that never returned could block all later updates. After 2 minutes a new fetch now starts anyway.
+
+## 1.0.0 (2026-11-07)
+
+First public version.

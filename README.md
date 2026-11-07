@@ -36,6 +36,7 @@ This app has two goals:
 - Usage history with charts (today, yesterday, day before, past weeks), CSV export
 - Works with Pro, Max and other plans: the numbers come straight from Claude's servers. Plans with a weekly limit only (no 5-hour limit) hide the 5-hour parts.
 - Languages: English, 中文, Español, Français, Deutsch, العربية (Settings → Language, default = Windows language)
+- Updates itself from the GitHub releases (Settings → Automatic updates), or on demand with **Check for updates** in the menu
 - No model calls, so it does not use any of your quota. About 45 MB RAM.
 
 <details>
@@ -53,6 +54,7 @@ This app has two goals:
 The app reads the sign-in that **Claude Code** saves on your PC, in `%USERPROFILE%\.claude\.credentials.json`.
 With it, it asks Claude's server for your current usage (`api.anthropic.com/api/oauth/usage`), the same numbers you see on [claude.ai/settings/usage](https://claude.ai/settings/usage).
 
+- Once a day it also asks GitHub (`api.github.com`) whether a newer release exists. A new version is only installed when its SHA-256 matches the checksum GitHub shows for the release file.
 - Nothing is sent anywhere else. Settings, cache and history stay in `%APPDATA%\ClaudeUsageTray\`.
 - When the saved sign-in expires, the app renews it the same way Claude Code does and writes it back to the same file (a one-time backup is kept as `.credentials.json.bak-usage-tray`).
 - No Claude Code sign-in? Use **Enter percentage manually** in the menu and type the number from the usage page.
@@ -64,6 +66,7 @@ With it, it asks Claude's server for your current usage (`api.anthropic.com/api/
 1. Download `ClaudeUsageTray.exe` from [Releases](../../releases).
 2. Run it. The icon appears in the tray (you may need to drag it out of the hidden icons area).
 3. It starts with Windows by default (can be switched off in the menu or settings).
+4. New versions install themselves (can be switched off in settings). See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## Build from source
 
@@ -75,7 +78,9 @@ No SDK needed, the C# compiler that ships with Windows is enough:
 
 The result is `bin\ClaudeUsageTray.exe`.
 
-Check options: `--png <file> [lang] [demo]` renders the popup, menu and icons to pictures, `--settings <file> [lang]` the settings window, `--test <base>` runs the session statistics self-test.
+Check options: `--png <file> [lang] [demo]` renders the popup, menu and icons to pictures, `--settings <file> [lang]` the settings window, `--test <base>` runs the session statistics self-test, `--update-now` checks for and installs a newer release without the tray (exit code 0 = updated, 1 = up to date).
+
+To release: raise `Updater.Version` in `src/Updater.cs`, add an entry to `CHANGELOG.md`, build, and publish a GitHub release tagged `v<version>` with `bin\ClaudeUsageTray.exe` attached under that exact name.
 
 ## Adding a language
 
