@@ -1,0 +1,10 @@
+# build output (the .exe goes to GitHub Releases, not into the repo)
+bin/
+*.exe
+*.pdb
+
+# internal working notes
+docs/
+
+# local tools
+.claude/
