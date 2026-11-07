@@ -305,7 +305,7 @@ public class HistoryForm : Form
             Text = noFive ? L.T("no_five_plan") : sum + "\n" + L.T("only_counted", L.PctN(History.N(History.MinFive)))
                 + (late ? "\n" + L.T("late_start", L.PctN(History.N(c.FiveFrom)), L.PctN(History.N(c.FiveDelta))) : "")
         };
-        var lv = NewList(L.T("c_start"), 115, L.T("c_last"), 115, L.T("five"), 125, L.T("c_weekinc"), 110, L.T("c_full"), 180);
+        var lv = NewList(L.T("c_start"), 115, L.T("c_last"), 115, L.T("five"), 170, L.T("c_weekinc"), 110, L.T("c_full"), 180);
         if (c != null && c.Valid)
         {
             var it = Row(lv, c, c.Counts);
@@ -313,6 +313,7 @@ public class HistoryForm : Form
             it.ForeColor = WeekC;
         }
         for (int i = h.Sessions.Count - 1; i >= 0; i--) Row(lv, h.Sessions[i], true);
+        AddDelete(lv);
         p.Controls.Add(lv);
         p.Controls.Add(lbl);
         lv.BringToFront();
@@ -325,11 +326,46 @@ public class HistoryForm : Form
     {
         var it = new ListViewItem(new[] {
             When(x.Start), When(x.End),
-            L.PctN(History.N(x.FiveDelta)) + (x.FiveFrom > 0 ? "  \u200E(" + History.N(x.FiveFrom) + "\u2192" + History.N(x.FiveMax) + ")" : ""),
+            x.FiveFrom > 0 ? L.T("five_range", L.PctN(History.N(x.FiveDelta)), History.N(x.FiveFrom), History.N(x.FiveMax)) : L.PctN(History.N(x.FiveDelta)),
             "\u200E+" + L.PctN(History.N(x.WeekDelta)),
             showRatio ? L.PctN(History.N(x.Ratio)) : L.T("not_reached", L.PctN(History.N(History.MinFive))) });
+        it.Tag = x;
         lv.Items.Add(it);
         return it;
+    }
+
+    // right-click or Delete key: remove a session from the list and the average (asks first)
+    void AddDelete(ListView lv)
+    {
+        var menu = new ContextMenuStrip { RightToLeft = L.Dir };
+        var del = menu.Items.Add(L.T("del_session"));
+        del.Click += delegate { DeleteSelected(lv); };
+        menu.Opening += (o, e) => { e.Cancel = lv.SelectedItems.Count == 0 || !(lv.SelectedItems[0].Tag is Session); };
+        lv.ContextMenuStrip = menu;
+        lv.MouseDown += (o, e) =>
+        {
+            if (e.Button != MouseButtons.Right) return;
+            var hit = lv.GetItemAt(e.X, e.Y);
+            if (hit != null) { lv.SelectedItems.Clear(); hit.Selected = true; }
+        };
+        lv.KeyDown += (o, e) => { if (e.KeyCode == Keys.Delete) DeleteSelected(lv); };
+    }
+
+    void DeleteSelected(ListView lv)
+    {
+        if (lv.SelectedItems.Count == 0) return;
+        var x = lv.SelectedItems[0].Tag as Session;
+        if (x == null) return;
+        var opts = L.Rtl ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : 0;
+        if (MessageBox.Show(this, L.T("del_ask", When(x.Start)), L.T("hist_title"), MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button2, opts) != DialogResult.Yes) return;
+        if (x == h.Cur) x.Valid = false; // running session: hidden now and not added to the list when it ends
+        else h.Sessions.Remove(x);
+        h.Save();
+        var tabs = (TabControl)Controls[0];
+        tabs.TabPages.RemoveAt(0);
+        tabs.TabPages.Insert(0, SessionsPage());
+        tabs.SelectedIndex = 0;
     }
 
     TabPage DayPage(DateTime day, string name)
