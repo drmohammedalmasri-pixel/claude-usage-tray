@@ -296,13 +296,16 @@ public class HistoryForm : Form
         string sum = avg.HasValue
             ? L.T("avg_sum", L.PctN(History.N(avg.Value)), L.Sessions(n))
             : L.T("no_sessions");
+        var c = h.Cur;
+        // session that began while the app was not reading: only the part seen after the first reading counts
+        bool late = !noFive && c != null && c.Valid && c.FiveFrom > 0;
         var lbl = new Label
         {
-            Dock = DockStyle.Top, Height = S(70), Padding = new Padding(S(10)),
+            Dock = DockStyle.Top, Height = S(late ? 100 : 70), Padding = new Padding(S(10)),
             Text = noFive ? L.T("no_five_plan") : sum + "\n" + L.T("only_counted", L.PctN(History.N(History.MinFive)))
+                + (late ? "\n" + L.T("late_start", L.PctN(History.N(c.FiveFrom)), L.PctN(History.N(c.FiveDelta))) : "")
         };
         var lv = NewList(L.T("c_start"), 115, L.T("c_last"), 115, L.T("five"), 125, L.T("c_weekinc"), 110, L.T("c_full"), 180);
-        var c = h.Cur;
         if (c != null && c.Valid)
         {
             var it = Row(lv, c, c.Counts);
@@ -321,7 +324,9 @@ public class HistoryForm : Form
     ListViewItem Row(ListView lv, Session x, bool showRatio)
     {
         var it = new ListViewItem(new[] {
-            When(x.Start), When(x.End), L.PctN(History.N(x.FiveDelta)), "\u200E+" + L.PctN(History.N(x.WeekDelta)),
+            When(x.Start), When(x.End),
+            L.PctN(History.N(x.FiveDelta)) + (x.FiveFrom > 0 ? "  \u200E(" + History.N(x.FiveFrom) + "\u2192" + History.N(x.FiveMax) + ")" : ""),
+            "\u200E+" + L.PctN(History.N(x.WeekDelta)),
             showRatio ? L.PctN(History.N(x.Ratio)) : L.T("not_reached", L.PctN(History.N(History.MinFive))) });
         lv.Items.Add(it);
         return it;

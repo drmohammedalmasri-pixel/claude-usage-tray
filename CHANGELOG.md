@@ -13,6 +13,7 @@
 - A finished 5-hour session could be missing from the session list. It was only added after the next reading, so when the PC slept or the app could not fetch, the session stayed hidden. It now moves to the list within a minute after its 5-hour window ends.
 - When fetching usage failed, nothing was written to the log, so the cause could not be found. Every failure is now logged (the same error again only every 30 minutes), plus a line when fetching works again.
 - A fetch that never returned could block all later updates. After 2 minutes a new fetch now starts anyway.
+- A 5-hour session that began while the PC was off or the app was not running looked as if it was counted wrong: the list showed only the part the app saw (e.g. 14 %) while the popup showed 43 %. The count itself is right (usage from before the first reading cannot be split), but the list now shows the range, e.g. *14 % (29→43)*, and a note explains it.
 
 ## 1.0.0 (2026-11-07)
 

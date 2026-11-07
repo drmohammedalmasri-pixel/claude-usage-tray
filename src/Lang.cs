@@ -213,6 +213,7 @@ public static class L
         { "c_weekinc", new[] { "زيادة الأسبوع", "Weekly increase", "每周增量", "Aumento semanal", "Hausse hebdo", "Wochenanstieg" } },
         { "c_full", new[] { "الجلسة الكاملة من الأسبوع", "Full session of the week", "完整会话占每周", "Sesión completa de la semana", "Session complète de la semaine", "Volle Sitzung der Woche" } },
         { "running", new[] { "جارية الآن", "Running now", "进行中", "En curso", "En cours", "Läuft gerade" } },
+        { "late_start", new[] { "الجلسة الحالية بدأت والبرنامج لا يقرأ (أول قراءة كانت {0})، فيُحسب منها فقط ما زاد بعد ذلك: {1}.", "The current session started while the app was not reading (first reading was {0}), so only what was added after that counts: {1}.", "当前会话开始时程序未在读取（首次读数为 {0}），因此只计算之后增加的部分：{1}。", "La sesión actual empezó cuando la app no leía (primera lectura {0}), así que solo cuenta lo añadido después: {1}.", "La session actuelle a commencé quand l'appli ne lisait pas (première lecture {0}) : seul ce qui a été ajouté ensuite compte : {1}.", "Die laufende Sitzung begann, als die App nicht las (erste Messung {0}); gezählt wird nur, was danach dazukam: {1}." } },
         { "not_reached", new[] { "لم تبلغ {0} بعد", "Not yet {0}", "尚未达到 {0}", "Aún no llega a {0}", "Pas encore {0}", "Noch nicht {0}" } },
         { "c_weekly", new[] { "الأسبوعي", "Weekly", "每周", "Semanal", "Hebdo", "Wöchentlich" } },
         { "c_fiveh", new[] { "الخمس ساعات", "5 hours", "5 小时", "5 horas", "5 heures", "5 Stunden" } },
