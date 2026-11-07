@@ -2,6 +2,8 @@
 
 ## 1.1.0 (2026-11-07)
 
+> **Coming from 1.0.0?** Version 1.0.0 cannot update itself. Download 1.1.0 once by hand from [Releases](../../releases); from then on new versions install themselves.
+
 ### New
 - **Updates**: *Check for updates* in the menu. Shows the new version and its notes, installs it and restarts the app.
 - **Automatic updates** switch in Settings → General (on by default): checks once a day and installs new versions by itself, with a notice after the restart. When it is off, the app only tells you a new version exists and the menu item becomes *Install version X*.
