@@ -35,7 +35,7 @@ This app has two goals:
 - 5-hour session statistics: how much of the week a full 5-hour session costs, and how many full sessions you have left
 - Usage history with charts (today, yesterday, day before, past weeks), CSV export
 - Works with Pro, Max and other plans: the numbers come straight from Claude's servers. Plans with a weekly limit only (no 5-hour limit) hide the 5-hour parts.
-- Languages: English, 中文, Español, Français, Deutsch, العربية (Settings → Language, default = Windows language)
+- Languages: English, 中文, Español, Français, Deutsch, العربية (Settings → Language, default = English)
 - Updates itself from the GitHub releases (Settings → Automatic updates), or on demand with **Check for updates** in the menu
 - No model calls, so it does not use any of your quota. About 45 MB RAM.
 

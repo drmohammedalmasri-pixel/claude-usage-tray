@@ -96,7 +96,7 @@ public class Settings
     public double? LastFivePct;
     public string LastFiveReset;
     public string LastFetch;
-    public string Language;               // "" = Windows language; null in old files = Arabic (first versions were Arabic only)
+    public string Language;               // "" = Windows language; new install = "en"; null in old files = Arabic (first versions were Arabic only)
     public bool NoFive;
     public bool AutoUpdate = true;        // install new GitHub releases by itself
     public string LastUpdateCheck;                   // last fetch had no 5-hour limit (plans with weekly limit only)
@@ -108,7 +108,7 @@ public class Settings
     {
         try { if (File.Exists(FilePath)) { var x = new JavaScriptSerializer().Deserialize<Settings>(File.ReadAllText(FilePath)); if (x.Language == null) x.Language = "ar"; return x; } }
         catch { }
-        return new Settings { Language = "" };
+        return new Settings { Language = "en" };   // new installs start in English (owner 08.11)
     }
 
     public void Save()
