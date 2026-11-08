@@ -54,7 +54,14 @@ static class Program
                 // started by the old version during an update: wait until it has exited
                 try { created = m.WaitOne(20000); } catch (AbandonedMutexException) { created = true; }
             }
-            if (!created) return;
+            if (!created) { Settings.Log("second start ignored, already running: " + OtherInstances()); return; }
+            Settings.Log("start v" + Updater.Version + " pid " + System.Diagnostics.Process.GetCurrentProcess().Id +" args [" + string.Join(" ", args) + "] Windows up " + (Environment.TickCount / 60000) + " min");
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => Settings.Log("crash: " + e.ExceptionObject);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) => Settings.Log("error (kept running): " + e.Exception);
+            TaskScheduler.UnobservedTaskException += (s, e) => { Settings.Log("task error: " + e.Exception.GetBaseException()); e.SetObserved(); };
+            SystemEvents.SessionEnding += (s, e) => Settings.Log("Windows " + (e.Reason == SessionEndReasons.SystemShutdown ? "shutdown" : "sign-out"));
+            StartWatchdog();
             Updater.CleanUp();
             try { SetProcessDPIAware(); } catch { }
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
@@ -62,8 +69,54 @@ static class Program
             Application.SetCompatibleTextRenderingDefault(false);
             var app = new TrayApp();
             if (updated) app.AnnounceUpdate();
+            Stage = "running";
             Application.Run(app);
+            Settings.Log("exit");
         }
+    }
+
+    // --- watchdog: notes in the log when the window thread stops responding (the app then looks frozen) ---
+    public static long Beat = DateTime.UtcNow.Ticks;   // set by a UI timer
+    public static volatile string Stage = "starting";   // last startup step reached
+
+    static void StartWatchdog()
+    {
+        var t = new Thread(() =>
+        {
+            bool reported = false;
+            long woke = DateTime.UtcNow.Ticks;
+            while (true)
+            {
+                Thread.Sleep(30000);
+                long now = DateTime.UtcNow.Ticks;
+                bool slept = (now - woke) > TimeSpan.TicksPerMinute; // PC was asleep: the UI had no chance to beat yet
+                woke = now;
+                if (slept) { Interlocked.Exchange(ref Beat, now); continue; }
+                double min = (DateTime.UtcNow.Ticks - Interlocked.Read(ref Beat)) / (double)TimeSpan.TicksPerMinute;
+                if (min >= 3 && !reported) { Settings.Log("not responding for " + Math.Round(min) + " min (step: " + Stage + ")"); reported = true; }
+                else if (min < 1 && reported) { Settings.Log("responding again"); reported = false; }
+            }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
+
+    static string OtherInstances()
+    {
+        var sb = new StringBuilder();
+        try
+        {
+            int me = System.Diagnostics.Process.GetCurrentProcess().Id;
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(System.Diagnostics.Process.GetCurrentProcess().ProcessName))
+            {
+                if (p.Id == me) continue;
+                string since = "?"; try { since = p.StartTime.ToString("HH:mm"); } catch { }
+                string resp = "?"; try { resp = p.Responding ? "responding" : "NOT responding"; } catch { }
+                sb.Append("pid " + p.Id + " since " + since + " " + resp + "; ");
+            }
+        }
+        catch (Exception ex) { sb.Append(ex.Message); }
+        return sb.Length > 0 ? sb.ToString() : "(none found)";
     }
 }
 
@@ -814,10 +867,13 @@ public class TrayApp : ApplicationContext
         var ignore = invoker.Handle;
         lastSuccess = Settings.S2D(st.LastFetch) ?? DateTime.MinValue;
 
+        Program.Stage = "settings";
         ApplySettings();
+        Program.Stage = "autostart check";
         if (!st.FirstRunDone) { SetAutostart(true); st.FirstRunDone = true; st.Save(); }
         else EnsureAutostart();
 
+        Program.Stage = "menu";
         ni.ContextMenuStrip = BuildMenu();
         ni.Text = "";
         ni.MouseMove += delegate { lastMove = DateTime.Now; lastMovePos = Cursor.Position; if (!pop.Visible) { UpdateUi(); pop.ShowAt(Cursor.Position); } };
@@ -827,6 +883,7 @@ public class TrayApp : ApplicationContext
         hide.Interval = 200;
         hide.Tick += delegate
         {
+            Interlocked.Exchange(ref Program.Beat, DateTime.UtcNow.Ticks);
             if (!pop.Visible) return;
             var c = Cursor.Position;
             // mouse resting on the icon sends no more moves: keep the popup while the cursor stays where the last icon move was
@@ -845,6 +902,7 @@ public class TrayApp : ApplicationContext
 
         SystemEvents.PowerModeChanged += (s, e) =>
         {
+            if (e.Mode == PowerModes.Resume) Settings.Log("resume from sleep");
             if (e.Mode == PowerModes.Resume) invoker.BeginInvoke((MethodInvoker)delegate
             {
                 var t = new System.Windows.Forms.Timer { Interval = 20000 };
@@ -853,9 +911,12 @@ public class TrayApp : ApplicationContext
             });
         };
 
+        Program.Stage = "icon";
         UpdateUi();
         ni.Visible = true;
+        Program.Stage = "first fetch";
         Refresh();
+        Settings.Log("ready, icon shown");
     }
 
     ToolStripLabel miHead;

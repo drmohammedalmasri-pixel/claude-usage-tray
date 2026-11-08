@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- **Better log** (`%APPDATA%\ClaudeUsageTray\log.txt`): app start (version, how long Windows has been up), a second start that was ignored because the app was already running, sleep/wake, Windows shutdown, exit, unexpected errors, and a note when the app stops responding for 3 minutes (with the startup step it was in).
+
 ## 1.2.0 (2026-11-08)
 
 ### New
