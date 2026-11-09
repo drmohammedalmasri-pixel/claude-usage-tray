@@ -8,6 +8,9 @@
 
 - **Gray icon when updates stop**: if fetching fails for more than 10 minutes, the tray icon turns gray (it still shows the last number), so it is clear the value is not live.
 
+- **Sign in again button**: when the saved sign-in has expired, the popup shows a small button that opens Claude Code's sign-in (`claude auth login`); you confirm in the browser, the window closes and the app fetches again by itself. Needs the terminal version of Claude Code.
+- **Open sign-in automatically** (Settings → General, off by default): opens that sign-in window by itself once per expiry.
+
 ### Fixed
 - **Expired sign-in fixes itself**: when the saved sign-in is rejected, the app no longer asks for a manual percentage. It watches Claude Code's sign-in file and fetches again a few seconds after Claude Code writes a new sign-in. A rejected token is never sent again (it could disturb Claude Code's own sign-in), and the log now shows the server's reason.
 

@@ -152,6 +152,7 @@ public class Settings
     public string Language;               // "" = Windows language; new install = "en"; null in old files = Arabic (first versions were Arabic only)
     public bool NoFive;
     public bool AutoUpdate = true;        // install new GitHub releases by itself
+    public bool AutoSignIn;               // open Claude Code's sign-in window by itself when the saved sign-in has expired
     public string LastUpdateCheck;                   // last fetch had no 5-hour limit (plans with weekly limit only)
 
     static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTray"); } }
@@ -207,6 +208,7 @@ public class View
     public string Ratio, RatioNow, SessionsLeft;
     public double? Opus;
     public string IconText;
+    public bool LoginNeeded; // popup shows the "sign in again" button
 }
 
 // ---------- data access (no model calls, so no usage cost) ----------
@@ -242,7 +244,7 @@ static class Api
     {
         public double? Week; public DateTime? WeekReset;
         public double? Five; public DateTime? FiveReset; public double? Opus;
-        public string Error; public bool Busy;
+        public string Error; public bool Busy, LoginNeeded;
     }
 
     static int Http(string method, string url, string body, Dictionary<string, string> headers, out string resp)
@@ -352,7 +354,7 @@ static class Api
             if (exp < DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeMilliseconds())
             {
                 string e = Refresh();
-                if (e != null) { res.Error = e; res.Busy = true; return res; }
+                if (e != null) { res.Error = e; res.Busy = true; res.LoginNeeded = e == L.T("login_expired") || e == L.T("no_login"); return res; }
                 c = LoadCreds(out root);
             }
             string resp = null;
@@ -363,7 +365,7 @@ static class Api
                 code = Http("GET", UsageUrl, null, h, out resp);
                 if (code != 401 || attempt == 1) break;
                 string e = Refresh();
-                if (e != null) { res.Error = e; res.Busy = true; return res; }
+                if (e != null) { res.Error = e; res.Busy = true; res.LoginNeeded = e == L.T("login_expired") || e == L.T("no_login"); return res; }
                 c = LoadCreds(out root);
             }
             if (code == 429) { res.Error = L.T("busy"); res.Busy = true; return res; }
@@ -498,6 +500,49 @@ public class Popup : Form
 
     static string Pct(double v) { return L.Pct(v); }
 
+    // small "sign in again" button under the error, only when the saved sign-in has expired
+    public event EventHandler SignInClick;
+    Rectangle btnRect = Rectangle.Empty;
+    bool btnHover;
+    void SignInButton(View v)
+    {
+        if (!v.LoginNeeded) { if (draw) btnRect = Rectangle.Empty; return; }
+        string t = L.T("signin");
+        var tf = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | (L.Rtl ? TextFormatFlags.RightToLeft : 0);
+        int bw = TextRenderer.MeasureText(g, t, fSmall, Size.Empty, tf).Width + S(26), bh = H(fSmall) + S(10);
+        y += S(3);
+        var r = new Rectangle(L.Rtl ? W - pad - bw : pad, y, bw, bh);
+        if (draw)
+        {
+            btnRect = r;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var b = new SolidBrush(btnHover ? Theme.AccentHover : Theme.Accent))
+            using (var p = Theme.Round(r, bh / 2f)) g.FillPath(b, p);
+            TextRenderer.DrawText(g, t, fSmall, r, Color.White, tf);
+        }
+        y += bh + S(3);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        bool h = btnRect.Contains(e.Location);
+        Cursor = h ? Cursors.Hand : Cursors.Default;
+        if (h != btnHover) { btnHover = h; Invalidate(); }
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (btnHover) { btnHover = false; Invalidate(); }
+    }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        base.OnMouseClick(e);
+        if (e.Button == MouseButtons.Left && btnRect.Contains(e.Location) && SignInClick != null) SignInClick(this, EventArgs.Empty);
+    }
+
     int Render(Graphics gr, bool doDraw)
     {
         g = gr; draw = doDraw; s = gr.DpiX / 96f; pad = S(14); W = S(310); y = pad;
@@ -512,6 +557,7 @@ public class Popup : Form
         if (!v.HasData)
         {
             TextR(v.Error ?? L.T("loading"), fBody, Color.FromArgb(230, 120, 110));
+            SignInButton(v);
             return y + pad;
         }
         Row(L.T("usage"), Pct(v.Usage), fBody, fg);
@@ -548,6 +594,7 @@ public class Popup : Form
         }
         if (!string.IsNullOrEmpty(v.Note)) TextR(v.Note, fSmall, Color.FromArgb(215, 170, 70));
         if (!string.IsNullOrEmpty(v.Error)) TextR(v.Error, fSmall, Color.FromArgb(230, 120, 110));
+        SignInButton(v);
         return y + pad - S(3);
     }
 
@@ -638,7 +685,7 @@ public class SettingsForm : Form
     double pUsage, pElapsed;
     Panel preview;
 
-    ToggleSwitch tFive, tSessLeft, tOpus, tLong, tWeeks, tExport, tNum, tBars, tBlue, tAuto, tUpd;
+    ToggleSwitch tFive, tSessLeft, tOpus, tLong, tWeeks, tExport, tNum, tBars, tBlue, tAuto, tUpd, tSignIn;
     Stepper nWeeks, nMin, nYellow, nRed, nBlue, nPoll;
     Picker cLang;
     public bool Autostart { get { return tAuto.Checked; } }
@@ -692,6 +739,7 @@ public class SettingsForm : Form
         tAuto = Toggle(autostart); Add(L.T("autostart"), L.T("autostart_sub"), tAuto);
         nPoll = Step(set.PollMinutes, 1, 60, null); Add(L.T("poll"), L.T("poll_sub"), nPoll);
         tUpd = Toggle(set.AutoUpdate); Add(L.T("upd_auto"), L.T("upd_auto_sub", Updater.Version), tUpd);
+        tSignIn = Toggle(set.AutoSignIn); Add(L.T("signin_auto"), L.T("signin_auto_sub"), tSignIn);
         cLang = new Picker { Font = fTitle, Size = new Size(S(210), S(32)) };
         cLang.Items.Add(L.T("lang_auto")); foreach (var nm in L.Names) cLang.Items.Add(nm);
         cLang.SelectedIndex = string.IsNullOrEmpty(set.Language) ? 0 : Math.Max(0, Array.IndexOf(L.Codes, set.Language) + 1);
@@ -853,6 +901,7 @@ public class SettingsForm : Form
         st.IconNumber = tNum.Checked; st.IconNumberBars = tBars.Checked;
         st.PollMinutes = nPoll.Value;
         st.AutoUpdate = tUpd.Checked;
+        st.AutoSignIn = tSignIn.Checked;
         st.Language = cLang.SelectedIndex <= 0 ? "" : L.Codes[cLang.SelectedIndex - 1];
     }
 }
@@ -942,6 +991,7 @@ public class TrayApp : ApplicationContext
         };
 
         WatchCredentials();
+        pop.SignInClick += delegate { pop.Hide(); SignIn(); };
 
         Program.Stage = "icon";
         UpdateUi();
@@ -1005,6 +1055,51 @@ public class TrayApp : ApplicationContext
         return menu;
     }
 
+    // ---------- new sign-in through Claude Code ----------
+    bool loginNeeded, autoSignInDone;
+    System.Diagnostics.Process signInProc;
+
+    static string ClaudeCli()
+    {
+        string p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude.exe");
+        if (File.Exists(p)) return p;
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
+        {
+            try
+            {
+                foreach (var n in new[] { "claude.exe", "claude.cmd" })
+                {
+                    string f = Path.Combine(dir.Trim().Trim('"'), n);
+                    if (File.Exists(f)) return f;
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    // Opens a console with "claude auth login": the browser asks to confirm, then the window closes by itself.
+    // The file watcher sees the new sign-in and fetches again.
+    void SignIn()
+    {
+        try
+        {
+            if (signInProc != null && !signInProc.HasExited) return; // already open
+            string cli = ClaudeCli();
+            if (cli == null)
+            {
+                Settings.Log("sign-in: claude CLI not found");
+                ni.ShowBalloonTip(6000, "Claude Usage Tray", L.T("signin_missing"), ToolTipIcon.Warning);
+                return;
+            }
+            // on failure the window stays open so the message can be read
+            string cmd = "/c title Claude Code & \"\"" + cli + "\" auth login || pause\"";
+            signInProc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", cmd) { UseShellExecute = true });
+            Settings.Log("sign-in window opened: " + cli);
+        }
+        catch (Exception ex) { Settings.Log("sign-in start failed: " + ex.Message); }
+    }
+
     // When Claude Code writes a new sign-in, retry at once instead of waiting for the slow error poll.
     FileSystemWatcher credWatch;
     System.Windows.Forms.Timer credDelay;
@@ -1059,6 +1154,7 @@ public class TrayApp : ApplicationContext
                     lastSuccess = DateTime.Now;
                     st.LastFetch = Settings.D2S(lastSuccess);
                     lastError = null;
+                    loginNeeded = false; autoSignInDone = false;
                     if (failCount > 0) Settings.Log("fetch ok again after " + failCount + " failed tries");
                     failCount = 0; loggedError = null;
                     st.LastOpusPct = r.Opus;
@@ -1070,6 +1166,9 @@ public class TrayApp : ApplicationContext
                 else
                 {
                     lastError = r.Error;
+                    loginNeeded = r.LoginNeeded;
+                    // automatic option: open the sign-in once per expiry, not on every poll
+                    if (loginNeeded && st.AutoSignIn && !autoSignInDone) { autoSignInDone = true; SignIn(); }
                     failCount++;
                     if (r.Error != loggedError || (DateTime.Now - loggedErrorAt).TotalMinutes >= 30)
                     {
@@ -1246,6 +1345,7 @@ public class TrayApp : ApplicationContext
         if (st.ManualPercent.HasValue && mAt.HasValue && mAt.Value >= start && mAt.Value > when) { usage = st.ManualPercent; when = mAt.Value; manual = true; }
 
         v.Error = lastError;
+        v.LoginNeeded = loginNeeded && lastError != null;
         if (!usage.HasValue) return v;
         v.HasData = true;
         v.Usage = usage.Value;
@@ -1342,6 +1442,8 @@ public class TrayApp : ApplicationContext
             app.st = new Settings { Language = app.st.Language, LastWeekPct = 64, LastFivePct = 38, LastFetch = Settings.D2S(now),
                 LastWeekReset = Settings.D2S(now.AddDays(2).AddHours(6)), LastFiveReset = Settings.D2S(now.AddHours(2).AddMinutes(40)) };
             app.hist = new History();
+            if (Environment.GetCommandLineArgs()[4] == "signin") // "--png <file> <lang> signin": expired sign-in look
+            { app.lastError = L.T("login_expired"); app.loginNeeded = true; app.lastSuccess = now.AddHours(-2); }
         }
         app.UpdateUi();
         using (var b = app.pop.Snapshot()) b.Save(path);
