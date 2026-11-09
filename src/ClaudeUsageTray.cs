@@ -178,7 +178,12 @@ public class Settings
             if (File.Exists(p) && new FileInfo(p).Length > 100000) File.Delete(p);
             File.AppendAllText(p, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + msg + Environment.NewLine);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            // the normal log could not be written: keep the line and the reason in a second file
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "ClaudeUsageTray-log.txt"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  [log.txt failed: " + ex.Message + "]  " + msg + Environment.NewLine); }
+            catch { }
+        }
     }
 
     public static string D2S(DateTime d) { return d.ToString("o", CultureInfo.InvariantCulture); }
@@ -212,7 +217,26 @@ static class Api
     const string ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     static string CredPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json"); } }
     static DateTime lastRefreshTry = DateTime.MinValue;
+    static string lastTriedToken, deadRefreshToken;
     static bool loggedKeys;
+    public static string CredFile { get { return CredPath; } }
+
+    // short error code from an OAuth error reply, for the log (never the whole reply)
+    static string ErrorText(string resp)
+    {
+        try
+        {
+            var j = new JavaScriptSerializer().DeserializeObject(resp) as Dictionary<string, object>;
+            if (j == null) return "";
+            object e; j.TryGetValue("error", out e);
+            var ed = e as Dictionary<string, object>;
+            if (ed != null) { object t; ed.TryGetValue("type", out t); e = t; }
+            object d; j.TryGetValue("error_description", out d);
+            string s = (e ?? "") + (d != null ? ": " + d : "");
+            return s.Length > 150 ? s.Substring(0, 150) : s;
+        }
+        catch { return ""; }
+    }
 
     public class Result
     {
@@ -271,12 +295,17 @@ static class Api
     // Returns null on success, otherwise an Arabic error text.
     static string Refresh()
     {
-        if ((DateTime.Now - lastRefreshTry).TotalMinutes < 15) return L.T("refresh_wait");
-        lastRefreshTry = DateTime.Now;
         Dictionary<string, object> root;
         var c = LoadCreds(out root);
         string rt = c.ContainsKey("refreshToken") ? c["refreshToken"] as string : null;
         if (string.IsNullOrEmpty(rt)) return L.T("no_login");
+        // A rejected refresh token stays dead: never send it again (refresh tokens are shared with Claude Code,
+        // so only a new sign-in by Claude Code helps; the file watcher retries as soon as that is written).
+        if (rt == deadRefreshToken) return L.T("login_expired");
+        // the 15 min pause is for the same token only; a new token from Claude Code is tried at once
+        if (rt == lastTriedToken && (DateTime.Now - lastRefreshTry).TotalMinutes < 15) return L.T("refresh_wait");
+        lastRefreshTry = DateTime.Now;
+        lastTriedToken = rt;
         var ser = new JavaScriptSerializer();
         string body = ser.Serialize(new Dictionary<string, object> { { "grant_type", "refresh_token" }, { "refresh_token", rt }, { "client_id", ClientId } });
         int lastCode = 0;
@@ -303,10 +332,11 @@ static class Api
                 Settings.Log("token refreshed via " + url);
                 return null;
             }
-            Settings.Log("refresh " + url + " -> HTTP " + code);
+            Settings.Log("refresh " + url + " -> HTTP " + code + " " + ErrorText(resp));
+            if (code == 400 || code == 401) break; // the token itself was rejected, the other address would say the same
         }
         if (lastCode == 429) return L.T("refresh_429");
-        if (lastCode == 400 || lastCode == 401) return L.T("login_expired");
+        if (lastCode == 400 || lastCode == 401) { deadRefreshToken = rt; return L.T("login_expired"); }
         return L.T("refresh_fail");
     }
 
@@ -911,6 +941,8 @@ public class TrayApp : ApplicationContext
             });
         };
 
+        WatchCredentials();
+
         Program.Stage = "icon";
         UpdateUi();
         ni.Visible = true;
@@ -971,6 +1003,33 @@ public class TrayApp : ApplicationContext
             miAuto.Checked = IsAutostart();
         };
         return menu;
+    }
+
+    // When Claude Code writes a new sign-in, retry at once instead of waiting for the slow error poll.
+    FileSystemWatcher credWatch;
+    System.Windows.Forms.Timer credDelay;
+    void WatchCredentials()
+    {
+        try
+        {
+            string dir = Path.GetDirectoryName(Api.CredFile);
+            if (!Directory.Exists(dir)) return;
+            credDelay = new System.Windows.Forms.Timer { Interval = 3000 }; // the file is written in several steps
+            credDelay.Tick += delegate
+            {
+                credDelay.Stop();
+                if (lastError == null) return; // working fine, nothing to fix
+                Settings.Log("sign-in file changed -> retry now");
+                Refresh();
+            };
+            credWatch = new FileSystemWatcher(dir, Path.GetFileName(Api.CredFile));
+            credWatch.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size;
+            FileSystemEventHandler h = (s, e) => invoker.BeginInvoke((MethodInvoker)delegate { credDelay.Stop(); credDelay.Start(); });
+            credWatch.Changed += h; credWatch.Created += h;
+            credWatch.Renamed += (s, e) => h(s, e);
+            credWatch.EnableRaisingEvents = true;
+        }
+        catch (Exception ex) { Settings.Log("sign-in file watch failed: " + ex.Message); }
     }
 
     void Refresh()
@@ -1200,6 +1259,8 @@ public class TrayApp : ApplicationContext
         double d = v.Usage - v.Elapsed;
         v.StatusColor = d > st.RedAt ? Red : d > st.YellowAt ? Yellow : (st.BlueIcon && d < -st.BlueAt) ? Blue : Green;
         v.IconText = IconArt.DiffText(d);
+        // fetching has stopped (not just one failed try): gray icon so it is clear the number is not live
+        if (lastError != null && (now - lastSuccess).TotalMinutes > 10) v.StatusColor = Theme.Gray;
         if (d > 1) v.Status = L.T("ahead", L.Pct(d));
         else if (d < -1) v.Status = L.T("behind", L.Pct(-d));
         else v.Status = L.T("ontrack");

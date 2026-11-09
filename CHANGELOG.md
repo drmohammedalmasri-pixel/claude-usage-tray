@@ -4,6 +4,12 @@
 
 ### New
 - **Better log** (`%APPDATA%\ClaudeUsageTray\log.txt`): app start (version, how long Windows has been up), a second start that was ignored because the app was already running, sleep/wake, Windows shutdown, exit, unexpected errors, and a note when the app stops responding for 3 minutes (with the startup step it was in).
+- If the log file cannot be written, the line goes to `%TEMP%\ClaudeUsageTray-log.txt` with the reason.
+
+- **Gray icon when updates stop**: if fetching fails for more than 10 minutes, the tray icon turns gray (it still shows the last number), so it is clear the value is not live.
+
+### Fixed
+- **Expired sign-in fixes itself**: when the saved sign-in is rejected, the app no longer asks for a manual percentage. It watches Claude Code's sign-in file and fetches again a few seconds after Claude Code writes a new sign-in. A rejected token is never sent again (it could disturb Claude Code's own sign-in), and the log now shows the server's reason.
 
 ## 1.2.0 (2026-11-08)
 
