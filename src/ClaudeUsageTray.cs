@@ -1093,7 +1093,8 @@ public class TrayApp : ApplicationContext
                 return;
             }
             // on failure the window stays open so the message can be read
-            string cmd = "/c title Claude Code & \"\"" + cli + "\" auth login || pause\"";
+            // cmd /c "…": cmd strips only the outer quote pair, so the inner quoted path stays intact
+            string cmd = "/c \"title Claude Code & \"" + cli + "\" auth login || pause\"";
             signInProc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", cmd) { UseShellExecute = true });
             Settings.Log("sign-in window opened: " + cli);
         }
