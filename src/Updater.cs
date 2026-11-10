@@ -13,7 +13,7 @@ using System.Web.Script.Serialization;
 
 public static class Updater
 {
-    public const string Version = "1.2.0"; // raise this for every release; the tag must be "v" + Version
+    public const string Version = "1.3.0"; // raise this for every release; the tag must be "v" + Version
     const string Repo = "drmohammedalmasri-pixel/claude-usage-tray";
     const string LatestUrl = "https://api.github.com/repos/" + Repo + "/releases/latest";
     const string AssetName = "ClaudeUsageTray.exe";

@@ -1,20 +1,16 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 (2026-11-10)
 
 ### New
-- **One data folder**: started from inside the Claude desktop app, Windows used to save settings, history and log in a hidden second folder, so sessions seemed to disappear. The app now notices this and starts again outside it.
-- **5-hour sessions are kept for good** and a session that crosses the weekly reset now counts too.
-
-- **Better log** (`%APPDATA%\ClaudeUsageTray\log.txt`): app start (version, how long Windows has been up), a second start that was ignored because the app was already running, sleep/wake, Windows shutdown, exit, unexpected errors, and a note when the app stops responding for 3 minutes (with the startup step it was in).
-- If the log file cannot be written, the line goes to `%TEMP%\ClaudeUsageTray-log.txt` with the reason.
-
-- **Gray icon when updates stop**: if fetching fails for more than 10 minutes, the tray icon turns gray (it still shows the last number), so it is clear the value is not live.
-
 - **Sign in again button**: when the saved sign-in has expired, the popup shows a small button that opens Claude Code's sign-in (`claude auth login`); you confirm in the browser, the window closes and the app fetches again by itself. Needs the terminal version of Claude Code.
 - **Open sign-in automatically** (Settings → General, off by default): opens that sign-in window by itself once per expiry.
+- **Gray icon when updates stop**: if fetching fails for more than 10 minutes, the tray icon turns gray (it still shows the last number), so it is clear the value is not live.
+- **5-hour sessions are kept for good** (the weeks setting now only limits how far back the average reaches), and a session that crosses the weekly reset now counts too.
+- **Better log** (`%APPDATA%\ClaudeUsageTray\log.txt`): app start (version, how long Windows has been up), a second start that was ignored because the app was already running, sleep/wake, Windows shutdown, exit, unexpected errors, and a note when the app stops responding for 3 minutes. If the log cannot be written, the line goes to `%TEMP%\ClaudeUsageTray-log.txt`.
 
 ### Fixed
+- **Sessions seemed to disappear**: when the app was started from inside the Claude desktop app, Windows saved its settings, history and log in a hidden second folder, so each kind of start saw a different history. The app now notices this and starts again outside it, so there is one data folder.
 - **Expired sign-in fixes itself**: when the saved sign-in is rejected, the app no longer asks for a manual percentage. It watches Claude Code's sign-in file and fetches again a few seconds after Claude Code writes a new sign-in. A rejected token is never sent again (it could disturb Claude Code's own sign-in), and the log now shows the server's reason.
 
 ## 1.2.0 (2026-11-08)
