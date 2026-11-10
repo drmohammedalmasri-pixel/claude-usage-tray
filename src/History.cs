@@ -14,9 +14,10 @@ public class Session
 {
     public string Key, Start, End;
     public double FiveFrom, FiveMax, WeekFrom, WeekTo;
+    public double WeekCarry; // weekly increase before a weekly reset that fell inside this session
     public bool Valid;
     public double FiveDelta { get { return FiveMax - FiveFrom; } }
-    public double WeekDelta { get { return WeekTo - WeekFrom; } }
+    public double WeekDelta { get { return WeekCarry + WeekTo - WeekFrom; } }
     public bool Counts { get { return Valid && FiveDelta >= History.MinFive; } }
     public double Ratio { get { return FiveDelta > 0 ? WeekDelta / FiveDelta * 100 : 0; } } // % of week per full 5h session
 }
@@ -34,7 +35,7 @@ public class WeekAcc
 public class History
 {
     public static double MinFive = 35; // smaller sessions are too rough (weekly % moves in whole steps); set from Settings
-    public static int KeepDays = 56;   // how long counted sessions are kept and averaged; set from Settings
+    public static int KeepDays = 56;   // how far back the average reaches; set from Settings
     public List<Sample> Samples = new List<Sample>();
     public List<Session> Sessions = new List<Session>();
     public List<WeekRec> Weeks = new List<WeekRec>();
@@ -59,7 +60,7 @@ public class History
 
     [ScriptIgnore] public bool NoSave;
 
-    // --test <png-base>: synthetic data, real file untouched. Expected: 2 sessions, average = (6+3)/(60+40) = 9 %.
+    // --test <png-base>: synthetic data, real file untouched. Expected: 3 sessions, average = (6+3+6)/(60+40+50) = 10 %.
     public static void SelfTest(string pngBase)
     {
         var h = new History { NoSave = true };
@@ -84,6 +85,11 @@ public class History
         h.Add(day.AddHours(10).AddMinutes(30), w, 0, null);
         sim(day.AddHours(10).AddMinutes(40), day.AddHours(15).AddMinutes(40), 40, 3);
         h.Add(day.AddHours(15).AddMinutes(50), w, 0, null);
+        // session across the weekly reset: +4 before it (w 46 -> 50), new week 0 -> 2, 5h 50 % -> counts +6
+        DateTime s4 = day.AddHours(16), r4 = s4.AddHours(5);
+        double[] wk4 = { 46, 48, 50, 0, 1, 2 }, f4 = { 0, 10, 20, 30, 40, 50 };
+        for (int i = 0; i < wk4.Length; i++) h.Add(s4.AddMinutes(10 * i), wk4[i], f4[i], r4);
+        h.CloseExpired(r4.AddMinutes(1));
         int n; double? a = h.Average(out n);
         File.WriteAllText(pngBase + ".txt", "sessions=" + n + " avg=" + (a.HasValue ? N(a.Value) : "none") + " samples=" + h.Samples.Count);
         using (var f = new HistoryForm(h))
@@ -122,9 +128,8 @@ public class History
         Samples.RemoveAll(x => (Settings.S2D(x.T) ?? DateTime.MinValue) < cutoff);
         Track(t, w, fv, fr, prev);
         TrackWeek(t, w, wr);
-        DateTime sc = t.AddDays(-KeepDays);
-        Sessions.RemoveAll(x => (Settings.S2D(x.End) ?? DateTime.MaxValue) < sc);
-        if (Sessions.Count > 1000) Sessions.RemoveRange(0, Sessions.Count - 1000);
+        // counted sessions are kept for good (owner 10.11); KeepDays only limits the average
+        if (Sessions.Count > 5000) Sessions.RemoveRange(0, Sessions.Count - 5000);
         Save();
     }
 
@@ -194,7 +199,12 @@ public class History
             };
             return;
         }
-        if (w < Cur.WeekTo - 0.5) Cur.Valid = false; // weekly reset inside the session
+        if (w < Cur.WeekTo - 0.5)
+        {
+            // weekly reset inside the session: keep the part before it, the new week starts at 0
+            Cur.WeekCarry += Cur.WeekTo - Cur.WeekFrom;
+            Cur.WeekFrom = 0;
+        }
         Cur.FiveMax = Math.Max(Cur.FiveMax, f);
         Cur.WeekTo = w;
         Cur.End = Settings.D2S(t);

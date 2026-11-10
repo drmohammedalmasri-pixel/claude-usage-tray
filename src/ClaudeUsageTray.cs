@@ -55,6 +55,7 @@ static class Program
                 try { created = m.WaitOne(20000); } catch (AbandonedMutexException) { created = true; }
             }
             if (!created) { Settings.Log("second start ignored, already running: " + OtherInstances()); return; }
+            if (RestartOutsideRedirect()) { m.ReleaseMutex(); return; }
             Settings.Log("start v" + Updater.Version + " pid " + System.Diagnostics.Process.GetCurrentProcess().Id +" args [" + string.Join(" ", args) + "] Windows up " + (Environment.TickCount / 60000) + " min");
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Settings.Log("crash: " + e.ExceptionObject);
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -73,6 +74,38 @@ static class Program
             Application.Run(app);
             Settings.Log("exit");
         }
+    }
+
+    // Started from inside a packaged app (the Claude desktop app: a build, a sign-in window), Windows quietly
+    // redirects AppData writes to %LOCALAPPDATA%\Packages\<app>\LocalCache\Roaming. Then settings, history and
+    // log go to a second copy and the next normal start sees none of it. Detect this with a marker file and start
+    // again through Explorer, which runs outside the redirect. Returns true when this process should exit.
+    static bool RestartOutsideRedirect()
+    {
+        try
+        {
+            string dir = Settings.Dir, id = Guid.NewGuid().ToString("N");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, ".where"), id);
+            string pk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Packages");
+            if (!Directory.Exists(pk)) return false;
+            bool redirected = false;
+            foreach (var p in Directory.GetDirectories(pk))
+            {
+                string f = Path.Combine(p, @"LocalCache\Roaming\ClaudeUsageTray\.where");
+                try { if (File.Exists(f) && File.ReadAllText(f) == id) { redirected = true; break; } } catch { }
+            }
+            if (!redirected) return false;
+            // guard against a loop if the Explorer start were redirected too
+            string guard = Path.Combine(dir, ".restart");
+            if (File.Exists(guard) && (DateTime.Now - File.GetLastWriteTime(guard)).TotalMinutes < 2)
+            { Settings.Log("data folder is redirected by a packaged app, restart did not help -> running anyway"); return false; }
+            File.WriteAllText(guard, DateTime.Now.ToString("o"));
+            Settings.Log("data folder is redirected by a packaged app -> starting again through Explorer");
+            System.Diagnostics.Process.Start("explorer.exe", "\"" + Application.ExecutablePath + "\"");
+            return true;
+        }
+        catch (Exception ex) { Settings.Log("redirect check: " + ex.Message); return false; }
     }
 
     // --- watchdog: notes in the log when the window thread stops responding (the app then looks frozen) ---
@@ -155,7 +188,7 @@ public class Settings
     public bool AutoSignIn;               // open Claude Code's sign-in window by itself when the saved sign-in has expired
     public string LastUpdateCheck;                   // last fetch had no 5-hour limit (plans with weekly limit only)
 
-    static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTray"); } }
+    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTray"); } }
     static string FilePath { get { return Path.Combine(Dir, "settings.json"); } }
 
     public static Settings Load()
