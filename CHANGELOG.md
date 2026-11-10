@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### New
+- **One data folder**: started from inside the Claude desktop app, Windows used to save settings, history and log in a hidden second folder, so sessions seemed to disappear. The app now notices this and starts again outside it.
+- **5-hour sessions are kept for good** and a session that crosses the weekly reset now counts too.
+
 - **Better log** (`%APPDATA%\ClaudeUsageTray\log.txt`): app start (version, how long Windows has been up), a second start that was ignored because the app was already running, sleep/wake, Windows shutdown, exit, unexpected errors, and a note when the app stops responding for 3 minutes (with the startup step it was in).
 - If the log file cannot be written, the line goes to `%TEMP%\ClaudeUsageTray-log.txt` with the reason.
 
